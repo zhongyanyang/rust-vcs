@@ -36,6 +36,12 @@ const META_DIR: &str = ".myvcs";
 pub struct Repo {
     root: PathBuf,
     meta: PathBuf,
+    /// ```text
+    /// Arc：大家共同持有的钥匙
+    /// └─ Mutex：带锁的柜子
+    ///     └─ Option：柜子可能是空的
+    ///         └─ CommitGraph：柜子里实际存放的东西
+    /// ```
     commit_graph: Arc<Mutex<Option<CommitGraph>>>,
 }
 

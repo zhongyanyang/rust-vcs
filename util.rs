@@ -91,14 +91,33 @@ pub fn hex_sha256_file(path: &Path) -> Result<String> {
     Ok(out)
 }
 
-// 默认 zlib 压缩辅助函数。
+/// 使用默认压缩级别，将输入字节压缩为 zlib 格式的数据。
+///
+/// 输入 `bytes` 是待压缩的原始字节数据。
+///
+/// 返回值 `Result<Vec<u8>>`：
+///
+/// - `Ok(data)`：压缩成功，得到压缩后的完整字节数据。
+/// - `Err(...)`：写入压缩器或完成压缩时失败，携带错误信息。
+///
+/// 本函数只在内存中压缩，不读写文件；压缩后的数据不保证比原始数据更小。
 pub fn compress_bytes(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(bytes)?;
     Ok(encoder.finish()?)
 }
 
-// 增量对象编码格式：魔数头 + JSON 负载。
+/// 将差量结构编码为可供后续保存或传输的字节数据。
+///
+/// 编码格式为差量格式标记（魔数头）加 JSON 数据，包含基准对象 ID、
+/// 重建指令和目标内容大小。
+///
+/// 返回值 `Result<Vec<u8>>`：
+///
+/// - `Ok(bytes)`：编码成功，得到编码后的完整字节数据。
+/// - `Err(...)`：JSON 序列化失败，携带错误信息。
+///
+/// 本函数只负责编码，不压缩、不写入文件，也不还原目标内容。
 pub fn encode_delta_blob(delta: &DeltaBlob) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     out.extend_from_slice(DELTA_MAGIC);
@@ -128,7 +147,14 @@ pub fn decode_delta_blob(raw: &[u8]) -> Result<Option<DeltaBlob>> {
     Ok(Some(delta))
 }
 
-// 从 base 到 target 构建基于固定块的增量指令。
+/// 从 base 到 target 构建基于固定块的增量指令。
+///
+/// 比较基准内容 base 和目标内容 target，生成一组重建目标内容的指令
+///
+/// 返回值 `Vec<DeltaOp>` 是一个按顺序执行的指令列表，包含两种操作：
+///
+/// - `Copy { offset, len }`：从基准内容的指定位置复制一段数据。
+/// - `Insert { data }`：直接追加这段数据。
 pub fn build_delta(base: &[u8], target: &[u8]) -> Vec<DeltaOp> {
     const CHUNK: usize = 32;
     const MAX_CANDIDATES: usize = 8;
@@ -303,7 +329,7 @@ pub fn advise_file_dontneed(file: &File) {
         }
     }
 }
-
+///尝试降低当前进程的 CPU 调度优先级，让 GC、校验等工作少与其他程序争抢 CPU
 pub fn maybe_set_background_nice() {
     #[cfg(target_os = "linux")]
     {
@@ -320,7 +346,8 @@ pub fn maybe_set_background_nice() {
         let _ = unsafe { libc::setpriority(libc::PRIO_PROCESS, 0, nice as libc::c_int) };
     }
 }
-
+/// 判断是否应启用深度增量压缩优化
+/// 也就是通过保存文件版本之间的差异来减少仓库占用。它本身不执行优化
 pub fn should_run_deep_delta_gc() -> bool {
     if env_truthy("MYVCS_FORCE_DEEP_DELTA") {
         return true;
@@ -350,6 +377,12 @@ pub fn should_run_deep_delta_gc() -> bool {
     (load1 / cpus) < threshold
 }
 
+/// 检测当前操作系统是否为 openEuler。
+///
+/// 读取 `/etc/os-release`，其中 `ID` 为 `openeuler` 时返回 `true`；
+/// 其他系统、读取失败或无法解析系统标识时返回 `false`。
+/// 检测结果在首次调用后缓存，后续调用复用该结果。
+/// 本函数仅识别系统，不修改系统配置；调用方根据返回值决定执行哪些操作。
 pub(crate) fn should_enable_openeuler_io_hints() -> bool {
     *OPENEULER_IO_HINTS.get_or_init(|| {
         let raw = fs::read_to_string("/etc/os-release").unwrap_or_default();
@@ -656,6 +689,19 @@ pub enum BlobTemperature {
     Cold,
 }
 
+/// 根据提交时间距当前时间的长短，将文件内容对象划分为热、温、冷三类。
+///
+/// 输入 `commit_timestamp` 是 Unix 时间戳，单位为秒。
+/// 调用方传入引用该对象的最新提交时间时，分类反映该对象最近出现于提交中的时间。
+///
+/// 返回值 `BlobTemperature`：
+///
+/// - `Hot`：距现在不足 1 小时。
+/// - `Warm`：距现在满 1 小时、不足 7 天。
+/// - `Cold`：距现在满 7 天及以上。
+///
+/// 未来时间按距现在 0 秒处理，归为 `Hot`。
+/// 此分类仅依据提交时间，不反映实际读取频率，也不修改对象或系统配置。
 pub fn categorize_blob_temperature(commit_timestamp: i64) -> BlobTemperature {
     let now = now_unix() as i64;
     let age_secs = (now - commit_timestamp).max(0) as u64;

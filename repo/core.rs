@@ -370,7 +370,7 @@ impl Repo {
                 }
             }
             None => {
-                //没有就自己读取再处理
+                //没有就自己读取再处理(分离头情况)
                 let raw = self.head_raw()?;
                 if raw.is_empty() {
                     Ok(None)
